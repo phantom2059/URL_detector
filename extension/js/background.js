@@ -14,11 +14,12 @@ let blacklist = new Set();
 // --- Initialization ---
 async function initModel() {
     try {
-        console.log("Loading ONNX model...");
+        console.log("Loading ONNX model from:", MODEL_PATH);
         session = await ort.InferenceSession.create(MODEL_PATH);
-        console.log("Model loaded successfully.");
+        console.log("Model loaded successfully. Input names:", session.inputNames, "Output names:", session.outputNames);
     } catch (e) {
         console.error("Failed to load model:", e);
+        session = null;
     }
 }
 
@@ -27,33 +28,34 @@ async function loadLists() {
     const stored = await chrome.storage.local.get(['whitelist']);
     if (stored.whitelist) {
         whitelist = new Set(stored.whitelist);
+        console.log(`Loaded ${whitelist.size} entries into whitelist.`);
     }
     
     // Load blacklist from CSV
     try {
+        console.log("Loading blacklist from:", BLACKLIST_PATH);
         const response = await fetch(BLACKLIST_PATH);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
         const text = await response.text();
         const lines = text.split('\n');
-        // Simple CSV parser: assume URL is in 1st or 2nd column depending on format
-        // JPCERT format: date,URL,description
-        // Header might exist.
+        // Optimized CSV parser: our optimized blacklist has only URLs (one per line, no header)
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
-            // Basic split by comma, ignoring quotes handling for simplicity in this demo
-            const parts = line.split(',');
-            // Heuristic: check if any part looks like a url
-            for (const part of parts) {
-                if (part.includes('http') || part.includes('www') || part.includes('.')) {
-                    // Strip quotes if present
-                    const cleanUrl = part.replace(/^"|"$/g, '');
-                    try {
-                        const hostname = new URL(cleanUrl).hostname;
-                        blacklist.add(cleanUrl); // Add full URL
-                        blacklist.add(hostname); // Add hostname too for broader match
-                    } catch(e) {
-                        blacklist.add(cleanUrl);
-                    }
+            
+            // Our optimized format: just URL, one per line
+            const cleanUrl = line.replace(/^"|"$/g, '').trim();
+            if (cleanUrl && (cleanUrl.includes('http') || cleanUrl.includes('www') || cleanUrl.includes('.'))) {
+                try {
+                    const urlObj = new URL(cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`);
+                    const hostname = urlObj.hostname;
+                    blacklist.add(cleanUrl); // Add full URL
+                    blacklist.add(hostname); // Add hostname too for broader match
+                } catch(e) {
+                    // If URL parsing fails, just add as-is (might be domain only)
+                    blacklist.add(cleanUrl);
                 }
             }
         }
@@ -85,12 +87,18 @@ async function predict(urlStr) {
         return { result: 'phishing', score: 1.0, reason: 'blacklist' };
     }
 
-    if (!session) return null;
+    if (!session) {
+        console.warn("Model not loaded yet, returning null");
+        return { result: 'error', reason: 'model_not_loaded' };
+    }
 
     // 3. ML Check
     try {
         const inputVector = featureExtractor.getVector(urlStr);
-        if (!inputVector) return null;
+        if (!inputVector) {
+            console.warn("Failed to extract features from URL");
+            return { result: 'error', reason: 'feature_extraction_failed' };
+        }
 
         // Create ONNX tensor
         // CatBoost ONNX usually expects float32 input [1, n_features]
@@ -114,7 +122,7 @@ async function predict(urlStr) {
 
     } catch (e) {
         console.error("Prediction error:", e);
-        return { result: 'error' };
+        return { result: 'error', reason: 'prediction_failed', error: e.message };
     }
 }
 
@@ -155,7 +163,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // --- Message Handler (Popup communication) ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "checkCurrentTab") {
-        predict(request.url).then(res => sendResponse(res));
+        predict(request.url).then(res => {
+            sendResponse(res || { result: 'error', reason: 'no_response' });
+        }).catch(err => {
+            console.error("Error in checkCurrentTab:", err);
+            sendResponse({ result: 'error', reason: 'exception', error: err.message });
+        });
         return true; // async response
     }
     if (request.action === "addToWhitelist") {
