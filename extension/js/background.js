@@ -205,25 +205,69 @@ async function predict(urlStr) {
     }
 }
 
+
+// --- Icon Generator ---
+async function updateIcon(tabId, status) {
+    try {
+        const response = await fetch('../images/avatar.png');
+        const blob = await response.blob();
+        const bitmap = await createImageBitmap(blob);
+
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const ctx = canvas.getContext('2d');
+
+        // Draw avatar
+        ctx.drawImage(bitmap, 0, 0);
+
+        // Draw Status Circle (Bottom Right)
+        const radius = canvas.width * 0.25; // 25% of icon size
+        const x = canvas.width - radius - 2;
+        const y = canvas.height - radius - 2;
+
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        
+        if (status === 'safe') {
+            ctx.fillStyle = '#40c057'; // Green
+        } else if (status === 'phishing') {
+            ctx.fillStyle = '#fa5252'; // Red
+        } else {
+            ctx.fillStyle = '#868e96'; // Grey (Loading/Unknown)
+        }
+        
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        chrome.action.setIcon({ imageData: imageData, tabId: tabId });
+        
+    } catch (e) {
+        console.error("Failed to generate dynamic icon:", e);
+        // Fallback to static icons if avatar fails
+        const iconPath = status === 'safe' ? "images/icon_safe.png" : 
+                        (status === 'phishing' ? "images/icon_danger.png" : "images/icon_neutral.png");
+        chrome.action.setIcon({ path: iconPath, tabId: tabId });
+    }
+}
+
 // --- Navigation Listener ---
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // 1. Loading state -> Neutral (Grey) icon
     if (changeInfo.status === 'loading') {
-        chrome.action.setIcon({ path: "images/icon_neutral.png", tabId: tabId });
+        updateIcon(tabId, 'loading');
         return;
     }
 
     // 2. Complete state -> Analyze -> Set Icon (Green/Red)
     if (changeInfo.status === 'complete' && tab.url && tab.url.startsWith('http')) {
         
-        // Ensure icon is neutral while analyzing (in case it wasn't set during loading)
-        // chrome.action.setIcon({ path: "images/icon_neutral.png", tabId: tabId });
-
         const prediction = await predict(tab.url);
         
         if (prediction && prediction.result === 'phishing') {
             // Alert user!
-            chrome.action.setIcon({ path: "images/icon_danger.png", tabId: tabId });
+            updateIcon(tabId, 'phishing');
             chrome.action.setBadgeText({ text: "!", tabId: tabId });
             chrome.action.setBadgeBackgroundColor({ color: "#FF0000", tabId: tabId });
             
@@ -239,7 +283,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             });
             
         } else if (prediction && prediction.result === 'safe') {
-            chrome.action.setIcon({ path: "images/icon_safe.png", tabId: tabId });
+            updateIcon(tabId, 'safe');
             // Remove badge if safe
             chrome.action.setBadgeText({ text: "", tabId: tabId });
         }
