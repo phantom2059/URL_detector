@@ -4,14 +4,11 @@ importScripts('../lib/onnxruntime-web.min.js');
 importScripts('feature_extractor.js');
 
 const MODEL_PATH = '../model/model.onnx';
-const BLACKLIST_URL = 'https://raw.githubusercontent.com/JPCERTCC/phishurl-list/main/urls.csv'; // Placeholder, need parsing
-// Since JPCERT provides CSV/TXT, we might need a parser or a pre-built JSON.
-// For demo, we will use local storage for whitelist and simple caching.
+const BLACKLIST_PATH = '../assets/phishurl-list.csv';
 
 let session = null;
 let featureExtractor = new FeatureExtractor();
 let whitelist = new Set();
-// Blacklist cache (simplified for memory)
 let blacklist = new Set(); 
 
 // --- Initialization ---
@@ -27,13 +24,43 @@ async function initModel() {
 
 async function loadLists() {
     // Load whitelist from storage
-    const stored = await chrome.storage.local.get(['whitelist', 'blacklist_date']);
+    const stored = await chrome.storage.local.get(['whitelist']);
     if (stored.whitelist) {
         whitelist = new Set(stored.whitelist);
     }
     
-    // TODO: Implement periodic blacklist update from JPCERT
-    // For now, empty or mock
+    // Load blacklist from CSV
+    try {
+        const response = await fetch(BLACKLIST_PATH);
+        const text = await response.text();
+        const lines = text.split('\n');
+        // Simple CSV parser: assume URL is in 1st or 2nd column depending on format
+        // JPCERT format: date,URL,description
+        // Header might exist.
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            // Basic split by comma, ignoring quotes handling for simplicity in this demo
+            const parts = line.split(',');
+            // Heuristic: check if any part looks like a url
+            for (const part of parts) {
+                if (part.includes('http') || part.includes('www') || part.includes('.')) {
+                    // Strip quotes if present
+                    const cleanUrl = part.replace(/^"|"$/g, '');
+                    try {
+                        const hostname = new URL(cleanUrl).hostname;
+                        blacklist.add(cleanUrl); // Add full URL
+                        blacklist.add(hostname); // Add hostname too for broader match
+                    } catch(e) {
+                        blacklist.add(cleanUrl);
+                    }
+                }
+            }
+        }
+        console.log(`Loaded ${blacklist.size} entries into blacklist.`);
+    } catch (e) {
+        console.error("Failed to load blacklist:", e);
+    }
 }
 
 initModel();
@@ -41,18 +68,24 @@ loadLists();
 
 // --- Prediction Logic ---
 async function predict(urlStr) {
-    if (!session) return null;
-    
-    // 1. Whitelist Check
+    let urlHostname = "";
     try {
-        const urlObj = new URL(urlStr);
-        if (whitelist.has(urlObj.hostname)) {
-            return { result: 'safe', reason: 'whitelist' };
-        }
-    } catch (e) { return null; }
+        urlHostname = new URL(urlStr).hostname;
+    } catch (e) {
+        return null;
+    }
+
+    // 1. Whitelist Check
+    if (whitelist.has(urlHostname)) {
+        return { result: 'safe', reason: 'whitelist' };
+    }
 
     // 2. Blacklist Check
-    // if (blacklist.has(urlStr)) return { result: 'phishing', reason: 'blacklist' };
+    if (blacklist.has(urlStr) || blacklist.has(urlHostname)) {
+        return { result: 'phishing', score: 1.0, reason: 'blacklist' };
+    }
+
+    if (!session) return null;
 
     // 3. ML Check
     try {
@@ -64,14 +97,12 @@ async function predict(urlStr) {
         const tensor = new ort.Tensor('float32', inputVector, [1, inputVector.length]);
         
         const feeds = { 'features': tensor }; 
-        // Note: input name 'features' depends on how CatBoost exported it. 
-        // Usually it's 'features' or 'float_features'. We might need to check model inputs.
         
         const results = await session.run(feeds);
         
         // Output depends on model. Usually 'probabilities' and 'label'.
         // CatBoost ONNX often outputs 'label' (int64) and 'probabilities' (float32 [1, 2])
-        const label = results.label ? results.label.data[0] : 0; // 0 or 1
+        const label = results.label ? Number(results.label.data[0]) : 0; // 0 or 1
         // Probabilities might be named 'probabilities'
         const probs = results.probabilities ? results.probabilities.data : [0.5, 0.5];
         const phishProb = probs[1];
@@ -103,11 +134,13 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             chrome.action.setBadgeBackgroundColor({ color: "#FF0000", tabId: tabId });
             
             // Show notification
+            const reasonText = prediction.reason === 'blacklist' ? "Found in Blacklist" : `ML Confidence: ${(prediction.score*100).toFixed(1)}%`;
+            
             chrome.notifications.create({
                 type: 'basic',
                 iconUrl: '../images/icon_danger.png',
                 title: 'Phishing Detected!',
-                message: `The site ${new URL(tab.url).hostname} appears to be malicious.\nConfidence: ${(prediction.score*100).toFixed(1)}%`,
+                message: `The site ${new URL(tab.url).hostname} appears to be malicious.\n${reasonText}`,
                 priority: 2
             });
             
@@ -134,4 +167,3 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         } catch(e) { sendResponse({ success: false }); }
     }
 });
-

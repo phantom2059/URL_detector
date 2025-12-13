@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Phishing Detector (Local AI)",
-  "version": "1.0",
-  "description": "Detects phishing URLs locally using an ONNX CatBoost model.",
+  "version": "1.1",
+  "description": "Detects phishing URLs locally using ONNX CatBoost model and Blacklists.",
   "permissions": [
     "activeTab",
     "storage",
@@ -30,7 +30,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["model/model.onnx", "images/*.png"],
+      "resources": ["model/model.onnx", "images/*.png", "assets/*.csv"],
       "matches": ["<all_urls>"]
     }
   ],
