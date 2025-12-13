@@ -137,48 +137,56 @@ async function predict(urlStr) {
         }
 
         // Create ONNX tensor
-        // CatBoost ONNX usually expects float32 input [1, n_features]
-        const tensor = new ort.Tensor('float32', inputVector, [1, inputVector.length]);
+        // Ensure data is Float32Array for performance and type safety
+        const floatData = new Float32Array(inputVector);
+        const tensor = new ort.Tensor('float32', floatData, [1, inputVector.length]);
         
         const feeds = { 'features': tensor }; 
         
-        const results = await session.run(feeds);
+        // CatBoost ONNX 'probabilities' output can sometimes be a Sequence of Maps, 
+        // which causes "Can't access output tensor data" in ORT Web WASM backend.
+        // We try to fetch everything first. If it fails, we fall back to fetching only 'label'.
+        let results;
+        try {
+            results = await session.run(feeds);
+        } catch (runError) {
+            console.warn("Standard session.run failed, trying to fetch only 'label'...", runError);
+            try {
+                // Try fetching only label. This often bypasses the Sequence output issue.
+                results = await session.run(feeds, ['label']);
+            } catch (retryError) {
+                console.error("Retry with only 'label' failed:", retryError);
+                throw retryError;
+            }
+        }
         
         // Debug outputs
         // console.log("Model results keys:", Object.keys(results));
 
         let label = 0;
-        let phishProb = 0;
+        let phishProb = 0; // Default if we can't get probability
 
-        // Try to find label and probabilities dynamically
+        // Extract Label
         if (results.label) {
+            // 'label' is usually an Int64 tensor. data is BigInt64Array or similar.
+            // Accessing [0] works.
             label = Number(results.label.data[0]);
         } else if (results.labels) {
              label = Number(results.labels.data[0]);
         }
         
+        // Extract Probability
         if (results.probabilities) {
-            // Map<int64, float> map is not directly supported in simple tensor access sometimes, 
-            // but CatBoost usually exports a Sequence of Maps or a Tensor of probabilities.
-            // If it's a tensor of shape [1, 2]
             const data = results.probabilities.data;
             if (data.length >= 2) {
                 phishProb = data[1];
-            } else {
-                phishProb = data[0]; // Fallback
+            } else if (data.length === 1) {
+                phishProb = data[0];
             }
-        } else if (results.probability) {
-             const data = results.probability.data;
-             phishProb = data.length >= 2 ? data[1] : data[0];
         } else {
-            // Fallback: search for any output that looks like probabilities (float32, size 2)
-            for (const key in results) {
-                const val = results[key];
-                if (val.type === 'float32' && val.data.length === 2) {
-                    phishProb = val.data[1];
-                    break;
-                }
-            }
+             // If we only fetched label (fallback case), we set prob based on label
+             // 0 -> 0.0 (safe), 1 -> 1.0 (phishing)
+             phishProb = label === 1 ? 0.99 : 0.01;
         }
 
         console.log(`Prediction: Label=${label}, Prob=${phishProb}`);
