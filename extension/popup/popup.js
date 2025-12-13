@@ -7,21 +7,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     const whitelistSearch = document.getElementById('whitelist-search');
     const btnAddWhitelist = document.getElementById('btn-add-whitelist');
     
+    // Stats elements
+    const statsSitesChecked = document.getElementById('stats-sites-checked');
+    const statsPhishingBlocked = document.getElementById('stats-phishing-blocked');
+    const statsSafeVisited = document.getElementById('stats-safe-visited');
+    
     // State
     let currentTabUrl = "";
     let currentHostname = "";
-    let whitelist = new Set();
+    let isInWhitelist = false;
 
     // --- Theme Management ---
     function loadTheme() {
         chrome.storage.local.get(['theme'], (result) => {
-            const isDark = result.theme !== 'light'; // Default to dark
+            const isDark = result.theme !== 'light';
             document.body.classList.toggle('light-mode', !isDark);
             themeToggle.checked = isDark;
         });
     }
 
-    themeToggle.addEventListener('change', (e) => {
+    themeToggle?.addEventListener('change', (e) => {
         const theme = e.target.checked ? 'dark' : 'light';
         document.body.classList.toggle('light-mode', theme === 'light');
         chrome.storage.local.set({ theme });
@@ -41,6 +46,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (tab.dataset.tab === 'whitelist') {
                 renderWhitelist();
             }
+            if (tab.dataset.tab === 'settings') {
+                loadStats();
+            }
         });
     });
 
@@ -52,7 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             currentHostname = new URL(tab.url).hostname;
             document.getElementById('current-url').textContent = currentHostname;
-        } catch(e) {
+        } catch {
             document.getElementById('current-url').textContent = "Invalid URL";
         }
 
@@ -68,9 +76,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (!response) {
                 resultIcon.textContent = "⏳";
-                resultTitle.textContent = "Model Loading";
+                resultTitle.textContent = "Loading...";
                 resultTitle.className = "status-title warning-text";
-                resultDesc.textContent = "Please wait a moment...";
+                resultDesc.textContent = "Please wait...";
                 return;
             }
 
@@ -92,19 +100,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 const reasonMap = {
                     'whitelist': 'In your whitelist',
-                    'global_safe': 'Verified safe domain',
+                    'global_safe': 'Verified safe domain (Tranco Top 10K)',
                     'ml': `Safety Score: ${((1 - response.score) * 100).toFixed(1)}%`
                 };
                 resultDesc.textContent = reasonMap[response.reason] || "No threats detected";
                 
                 if (response.reason === 'whitelist') {
+                    isInWhitelist = true;
                     btnAddWhitelist.textContent = "Remove from Whitelist";
-                    btnAddWhitelist.onclick = removeFromWhitelistCurrent;
                 }
             } else {
                 resultIcon.textContent = "❓";
                 resultTitle.textContent = "Unknown Status";
-                resultDesc.textContent = response.error || "Analysis failed";
+                resultDesc.textContent = response.error || "Analysis in progress...";
             }
         });
     } else {
@@ -114,21 +122,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // --- Whitelist Management ---
-    function loadWhitelist() {
-        chrome.storage.local.get(['whitelist'], (result) => {
-            if (result.whitelist) {
-                whitelist = new Set(result.whitelist);
-            }
-        });
-    }
-
     function renderWhitelist(filter = "") {
-        chrome.storage.local.get(['whitelist'], (result) => {
-            const list = result.whitelist || [];
-            whitelist = new Set(list);
+        chrome.runtime.sendMessage({ action: "getWhitelist" }, (list) => {
             whitelistList.innerHTML = '';
-
-            const filtered = list.filter(domain => domain.includes(filter.toLowerCase()));
+            
+            const filtered = (list || []).filter(domain => domain.includes(filter.toLowerCase()));
 
             if (filtered.length === 0) {
                 whitelistList.innerHTML = '<div style="text-align: center; padding: 20px; opacity: 0.5;">No items found</div>';
@@ -155,40 +153,45 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function removeDomain(domain) {
-        whitelist.delete(domain);
-        chrome.storage.local.set({ whitelist: Array.from(whitelist) }, () => {
+        chrome.runtime.sendMessage({ action: "removeFromWhitelist", hostname: domain }, () => {
             renderWhitelist(whitelistSearch.value);
-            // Refresh logic if current page was removed?
-            // Optional: reload tab
         });
     }
 
-    function addToWhitelistCurrent() {
+    btnAddWhitelist?.addEventListener('click', async () => {
         if (!currentHostname) return;
-        whitelist.add(currentHostname);
-        chrome.storage.local.set({ whitelist: Array.from(whitelist) }, () => {
-            // Update UI
-            btnAddWhitelist.textContent = "Remove from Whitelist";
-            btnAddWhitelist.onclick = removeFromWhitelistCurrent;
-            chrome.tabs.reload(tab.id); // Reload to reflect changes (e.g. icon update)
-            window.close();
+        
+        if (isInWhitelist) {
+            // Remove from whitelist
+            chrome.runtime.sendMessage({ 
+                action: "removeFromWhitelist", 
+                hostname: currentHostname.replace(/^www\./, '') 
+            }, () => {
+                chrome.tabs.reload(tab.id);
+                window.close();
+            });
+        } else {
+            // Add to whitelist
+            chrome.runtime.sendMessage({ 
+                action: "addToWhitelist", 
+                url: currentTabUrl 
+            }, (res) => {
+                if (res?.success) {
+                    chrome.tabs.reload(tab.id);
+                    window.close();
+                }
+            });
+        }
+    });
+
+    whitelistSearch?.addEventListener('input', (e) => renderWhitelist(e.target.value));
+
+    // --- Stats ---
+    function loadStats() {
+        chrome.runtime.sendMessage({ action: "getStats" }, (stats) => {
+            if (statsSitesChecked) statsSitesChecked.textContent = stats?.sitesChecked || 0;
+            if (statsPhishingBlocked) statsPhishingBlocked.textContent = stats?.phishingBlocked || 0;
+            if (statsSafeVisited) statsSafeVisited.textContent = stats?.safeVisited || 0;
         });
     }
-
-    function removeFromWhitelistCurrent() {
-        if (!currentHostname) return;
-        whitelist.delete(currentHostname);
-        chrome.storage.local.set({ whitelist: Array.from(whitelist) }, () => {
-            btnAddWhitelist.textContent = "Add to Whitelist";
-            btnAddWhitelist.onclick = addToWhitelistCurrent;
-            chrome.tabs.reload(tab.id);
-            window.close();
-        });
-    }
-
-    btnAddWhitelist.onclick = addToWhitelistCurrent;
-    whitelistSearch.addEventListener('input', (e) => renderWhitelist(e.target.value));
-
-    // Initial load
-    loadWhitelist();
 });
