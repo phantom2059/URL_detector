@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Phishing Detector (Local AI)",
+  "version": "1.0",
+  "description": "Detects phishing URLs locally using an ONNX CatBoost model.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "images/icon_neutral.png",
+      "48": "images/icon_neutral.png",
+      "128": "images/icon_neutral.png"
+    }
+  },
+  "background": {
+    "service_worker": "js/background.js"
+  },
+  "icons": {
+    "16": "images/icon_neutral.png",
+    "48": "images/icon_neutral.png",
+    "128": "images/icon_neutral.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["model/model.onnx", "images/*.png"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}
