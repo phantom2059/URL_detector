@@ -108,12 +108,15 @@ async function predict(urlStr) {
 
     // 2. Global Safe List Check
     // Check main domain and subdomains
-    if (globalSafeList.has(urlHostname)) {
+    // Normalize: remove www.
+    const normalizedHostname = urlHostname.replace(/^www\./, '');
+    
+    if (globalSafeList.has(urlHostname) || globalSafeList.has(normalizedHostname)) {
          return { result: 'safe', reason: 'global_safe', score: 0.0 };
     }
     // Check if hostname ends with any safe domain (e.g. "mail.google.com" ends with "google.com")
     for (const safeDomain of globalSafeList) {
-        if (urlHostname.endsWith('.' + safeDomain) || urlHostname === safeDomain) {
+        if (urlHostname.endsWith('.' + safeDomain) || normalizedHostname === safeDomain) {
             return { result: 'safe', reason: 'global_safe', score: 0.0 };
         }
     }
