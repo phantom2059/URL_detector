@@ -144,12 +144,44 @@ async function predict(urlStr) {
         
         const results = await session.run(feeds);
         
-        // Output depends on model. Usually 'probabilities' and 'label'.
-        // CatBoost ONNX often outputs 'label' (int64) and 'probabilities' (float32 [1, 2])
-        const label = results.label ? Number(results.label.data[0]) : 0; // 0 or 1
-        // Probabilities might be named 'probabilities'
-        const probs = results.probabilities ? results.probabilities.data : [0.5, 0.5];
-        const phishProb = probs[1];
+        // Debug outputs
+        // console.log("Model results keys:", Object.keys(results));
+
+        let label = 0;
+        let phishProb = 0;
+
+        // Try to find label and probabilities dynamically
+        if (results.label) {
+            label = Number(results.label.data[0]);
+        } else if (results.labels) {
+             label = Number(results.labels.data[0]);
+        }
+        
+        if (results.probabilities) {
+            // Map<int64, float> map is not directly supported in simple tensor access sometimes, 
+            // but CatBoost usually exports a Sequence of Maps or a Tensor of probabilities.
+            // If it's a tensor of shape [1, 2]
+            const data = results.probabilities.data;
+            if (data.length >= 2) {
+                phishProb = data[1];
+            } else {
+                phishProb = data[0]; // Fallback
+            }
+        } else if (results.probability) {
+             const data = results.probability.data;
+             phishProb = data.length >= 2 ? data[1] : data[0];
+        } else {
+            // Fallback: search for any output that looks like probabilities (float32, size 2)
+            for (const key in results) {
+                const val = results[key];
+                if (val.type === 'float32' && val.data.length === 2) {
+                    phishProb = val.data[1];
+                    break;
+                }
+            }
+        }
+
+        console.log(`Prediction: Label=${label}, Prob=${phishProb}`);
 
         if (label === 1 || phishProb > 0.5) {
             return { result: 'phishing', score: phishProb, reason: 'ml' };
