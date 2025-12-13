@@ -173,17 +173,75 @@ async function predict(urlStr) {
 }
 
 // --- Icon Update (Pre-rendered icons for instant display) ---
-function updateIcon(tabId, status) {
+async function updateIcon(tabId, status, showSmallGreenCircle = false) {
     // Use pre-rendered avatar icons with status dots
     const iconType = status === 'safe' ? 'safe' : 
                     (status === 'phishing' ? 'danger' : 'neutral');
     
+    // For safe sites with small green circle, create custom icon
+    if (status === 'safe' && showSmallGreenCircle) {
+        // Check if OffscreenCanvas is supported
+        if (typeof OffscreenCanvas !== 'undefined') {
+            try {
+                // Load base icon image
+                const iconUrl = chrome.runtime.getURL(`images/avatar_${iconType}_128.png`);
+                const response = await fetch(iconUrl);
+                if (!response.ok) throw new Error(`Failed to fetch icon: ${response.status}`);
+                
+                const blob = await response.blob();
+                const img = await createImageBitmap(blob);
+                
+                const sizes = [16, 32, 48, 128];
+                const imageData = {};
+                
+                for (const size of sizes) {
+                    // Create canvas using OffscreenCanvas (supported in service workers)
+                    const canvas = new OffscreenCanvas(size, size);
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Draw base icon
+                    ctx.drawImage(img, 0, 0, size, size);
+                    
+                    // Draw small green circle (5% of size) in bottom-right corner
+                    const circleRadius = size * 0.025; // 2.5% radius = ~5% diameter
+                    const padding = size * 0.05; // 5% padding from edge
+                    const centerX = size - padding - circleRadius;
+                    const centerY = size - padding - circleRadius;
+                    
+                    ctx.fillStyle = '#40c057'; // Green color
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, circleRadius, 0, 2 * Math.PI);
+                    ctx.fill();
+                    
+                    // Get ImageData
+                    const imageDataObj = ctx.getImageData(0, 0, size, size);
+                    imageData[size.toString()] = imageDataObj;
+                }
+                
+                // Set custom icon with ImageData
+                chrome.action.setIcon({
+                    imageData: imageData,
+                    tabId: tabId
+                });
+                return;
+            } catch (e) {
+                console.error("Failed to create custom safe icon with circle:", e);
+                // Fallback to regular icon
+            }
+        } else {
+            console.warn("OffscreenCanvas not supported, using regular icon");
+            // Fallback to regular icon
+        }
+    }
+    
+    // Use larger icons (48px) for better visibility on toolbar
+    // Use absolute paths with chrome.runtime.getURL()
     chrome.action.setIcon({
         path: {
-            "16": `images/avatar_${iconType}_16.png`,
-            "32": `images/avatar_${iconType}_32.png`,
-            "48": `images/avatar_${iconType}_48.png`,
-            "128": `images/avatar_${iconType}_128.png`
+            "16": chrome.runtime.getURL(`images/avatar_${iconType}_48.png`),
+            "32": chrome.runtime.getURL(`images/avatar_${iconType}_48.png`),
+            "48": chrome.runtime.getURL(`images/avatar_${iconType}_48.png`),
+            "128": chrome.runtime.getURL(`images/avatar_${iconType}_128.png`)
         },
         tabId: tabId
     });
@@ -202,7 +260,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     
     if (prediction?.result === 'phishing') {
         stats.phishingBlocked++;
-        updateIcon(tabId, 'phishing');
+        await updateIcon(tabId, 'phishing');
         chrome.action.setBadgeText({ text: "!", tabId });
         chrome.action.setBadgeBackgroundColor({ color: "#FF0000", tabId });
         
@@ -224,17 +282,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     } else if (prediction?.result === 'safe') {
         stats.safeVisited++;
         
-        // Only show green circle for ML-verified sites
-        // For global_safe/whitelist, show pure avatar (neutral)
-        if (prediction.reason === 'ml') {
-            updateIcon(tabId, 'safe');
-        } else {
-            updateIcon(tabId, 'neutral');
-        }
+        // Show safe icon with small green circle (5% of size) for all safe sites
+        await updateIcon(tabId, 'safe', true);
         chrome.action.setBadgeText({ text: "", tabId });
     } else {
         // Error or unknown - pure avatar
-        updateIcon(tabId, 'neutral');
+        await updateIcon(tabId, 'neutral');
         chrome.action.setBadgeText({ text: "", tabId });
     }
     
