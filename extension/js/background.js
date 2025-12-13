@@ -23,8 +23,7 @@ let blacklist = new Set();
 // Stats
 let stats = { sitesChecked: 0, phishingBlocked: 0, safeVisited: 0 };
 
-// Cached avatar for dynamic icons
-let avatarBitmap = null;
+// Stats
 
 // --- Initialization ---
 async function initModel() {
@@ -38,17 +37,6 @@ async function initModel() {
     }
 }
 
-async function loadAvatar() {
-    try {
-        const url = chrome.runtime.getURL('images/avatar.png');
-        const response = await fetch(url);
-        const blob = await response.blob();
-        avatarBitmap = await createImageBitmap(blob);
-        console.log("Avatar loaded for dynamic icons");
-    } catch (e) {
-        console.warn("Avatar load failed, will use static icons:", e);
-    }
-}
 
 async function loadLists() {
     // Load whitelist from storage
@@ -99,7 +87,7 @@ async function loadLists() {
 }
 
 // Initialize everything
-Promise.all([initModel(), loadAvatar(), loadLists()]).then(() => {
+Promise.all([initModel(), loadLists()]).then(() => {
     console.log("Extension fully initialized!");
 });
 
@@ -184,45 +172,20 @@ async function predict(urlStr) {
     }
 }
 
-// --- Dynamic Icon Generator ---
-async function updateIcon(tabId, status) {
-    if (avatarBitmap) {
-        try {
-            const size = 128;
-            const canvas = new OffscreenCanvas(size, size);
-            const ctx = canvas.getContext('2d');
-
-            // Draw avatar (scaled)
-            ctx.drawImage(avatarBitmap, 0, 0, size, size);
-
-            // Draw status circle
-            const radius = size * 0.22;
-            const x = size - radius - 4;
-            const y = size - radius - 4;
-
-            ctx.beginPath();
-            ctx.arc(x, y, radius, 0, 2 * Math.PI);
-            
-            ctx.fillStyle = status === 'safe' ? '#40c057' : 
-                           (status === 'phishing' ? '#fa5252' : '#868e96');
-            ctx.fill();
-            
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = '#ffffff';
-            ctx.stroke();
-
-            const imageData = ctx.getImageData(0, 0, size, size);
-            await chrome.action.setIcon({ imageData: imageData, tabId: tabId });
-            return;
-        } catch (e) {
-            console.warn("Dynamic icon failed:", e);
-        }
-    }
+// --- Icon Update (Pre-rendered icons for instant display) ---
+function updateIcon(tabId, status) {
+    // Use pre-rendered avatar icons with status dots
+    const iconType = status === 'safe' ? 'safe' : 
+                    (status === 'phishing' ? 'danger' : 'neutral');
     
-    // Fallback to static
-    const iconPath = status === 'safe' ? 'images/icon_safe.png' : 
-                    (status === 'phishing' ? 'images/icon_danger.png' : 'images/icon_neutral.png');
-    await chrome.action.setIcon({ path: iconPath, tabId: tabId });
+    chrome.action.setIcon({
+        path: {
+            "16": `images/avatar_${iconType}_16.png`,
+            "48": `images/avatar_${iconType}_48.png`,
+            "128": `images/avatar_${iconType}_128.png`
+        },
+        tabId: tabId
+    });
 }
 
 // --- Navigation Listener ---
