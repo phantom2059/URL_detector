@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 const reasonMap = {
                     'whitelist': 'In your whitelist',
-                    'global_safe': 'Verified safe domain (Tranco Top 10K)',
+                    'global_safe': 'Verified safe domain',
                     'ml': `Safety Score: ${((1 - response.score) * 100).toFixed(1)}%`
                 };
                 resultDesc.textContent = reasonMap[response.reason] || "No threats detected";
