@@ -3,62 +3,260 @@
 <head>
     <meta charset="utf-8">
     <style>
-        body { width: 300px; padding: 15px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .status-box { 
-            padding: 15px; 
-            border-radius: 8px; 
-            text-align: center; 
-            color: white; 
-            margin-bottom: 15px;
-            display: none;
+        :root {
+            --bg-color: #1a1b1e;
+            --text-color: #e9ecef;
+            --card-bg: #25262b;
+            --border-color: #373a40;
+            --accent-color: #339af0;
+            --danger-color: #fa5252;
+            --success-color: #40c057;
+            --warning-color: #fab005;
         }
-        .safe { background-color: #28a745; }
-        .danger { background-color: #dc3545; }
-        .unknown { background-color: #6c757d; }
-        
-        h2 { margin: 0 0 10px 0; font-size: 18px; }
-        p { margin: 5px 0; font-size: 14px; }
-        
-        button {
-            width: 100%;
-            padding: 8px;
+
+        body.light-mode {
+            --bg-color: #f8f9fa;
+            --text-color: #212529;
+            --card-bg: #ffffff;
+            --border-color: #dee2e6;
+        }
+
+        body {
+            width: 350px;
+            padding: 0;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px;
             border: none;
-            border-radius: 4px;
-            background-color: #f8f9fa;
-            border: 1px solid #ddd;
+            background: none;
+            color: var(--text-color);
             cursor: pointer;
-            margin-top: 10px;
+            font-weight: 500;
+            opacity: 0.7;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
         }
-        button:hover { background-color: #e2e6ea; }
-        
-        .url-text {
-            word-break: break-all;
-            color: #666;
-            font-size: 12px;
+
+        .tab-btn.active {
+            opacity: 1;
+            color: var(--accent-color);
+            border-bottom-color: var(--accent-color);
+        }
+
+        .tab-content {
+            display: none;
+            padding: 15px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Status View */
+        .status-card {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 15px;
+            border: 1px solid var(--border-color);
+        }
+
+        .status-icon {
+            font-size: 48px;
             margin-bottom: 10px;
         }
+
+        .status-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .status-desc {
+            font-size: 14px;
+            opacity: 0.8;
+            margin-bottom: 15px;
+        }
+
+        .safe-text { color: var(--success-color); }
+        .danger-text { color: var(--danger-color); }
+        .warning-text { color: var(--warning-color); }
+
+        .url-box {
+            background-color: var(--bg-color);
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            margin-bottom: 15px;
+            border: 1px solid var(--border-color);
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            cursor: pointer;
+            font-weight: 500;
+            transition: 0.2s;
+        }
+
+        .action-btn:hover {
+            background-color: var(--accent-color);
+            color: white;
+            border-color: var(--accent-color);
+        }
+
+        /* Whitelist View */
+        .search-box {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .whitelist-items {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .whitelist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .whitelist-item:last-child { border-bottom: none; }
+
+        .delete-btn {
+            background: none;
+            border: none;
+            color: var(--danger-color);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 5px;
+        }
+
+        /* Settings View */
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+
+        .switch input { opacity: 0; width: 0; height: 0; }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 20px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider { background-color: var(--accent-color); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
     </style>
 </head>
 <body>
-    <div id="loading">Analyzing...</div>
-    
-    <div id="status-safe" class="status-box safe">
-        <h2>✅ Safe</h2>
-        <p>No phishing detected</p>
-        <p id="score-safe"></p>
-    </div>
-    
-    <div id="status-danger" class="status-box danger">
-        <h2>⚠️ Phishing!</h2>
-        <p>This site looks malicious</p>
-        <p id="score-danger"></p>
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="status">Status</button>
+        <button class="tab-btn" data-tab="whitelist">Whitelist</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
     </div>
 
-    <div class="url-text" id="current-url"></div>
-    
-    <button id="btn-whitelist">Add to Whitelist</button>
-    
+    <!-- Status Tab -->
+    <div id="status" class="tab-content active">
+        <div id="loading" class="status-card">
+            <div class="status-icon">🔄</div>
+            <div class="status-title">Analyzing...</div>
+            <div class="status-desc">Checking URL safety</div>
+        </div>
+
+        <div id="result-card" class="status-card" style="display: none;">
+            <div id="result-icon" class="status-icon"></div>
+            <div id="result-title" class="status-title"></div>
+            <div id="result-desc" class="status-desc"></div>
+        </div>
+
+        <div class="url-box" id="current-url"></div>
+        
+        <button id="btn-add-whitelist" class="action-btn">Add to Whitelist</button>
+    </div>
+
+    <!-- Whitelist Tab -->
+    <div id="whitelist" class="tab-content">
+        <input type="text" id="whitelist-search" class="search-box" placeholder="Search domains...">
+        <div id="whitelist-list" class="whitelist-items">
+            <!-- Items injected by JS -->
+            <div style="text-align: center; padding: 20px; opacity: 0.5;">No items</div>
+        </div>
+    </div>
+
+    <!-- Settings Tab -->
+    <div id="settings" class="tab-content">
+        <div class="setting-row">
+            <span>Dark Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="theme-toggle" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div style="margin-top: 20px; font-size: 12px; opacity: 0.5; text-align: center;">
+            Phishing Detector v1.0<br>
+            Powered by CatBoost & ONNX
+        </div>
+    </div>
+
     <script src="popup.js"></script>
 </body>
 </html>
-

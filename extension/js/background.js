@@ -3,19 +3,31 @@
 importScripts('../lib/onnxruntime-web.min.js');
 importScripts('feature_extractor.js');
 
+// Configure ONNX Runtime to use the local WASM files and disable dynamic import if possible
+ort.env.wasm.wasmPaths = {
+    'ort-wasm.wasm': '../lib/ort-wasm.wasm',
+    'ort-wasm-simd.wasm': '../lib/ort-wasm-simd.wasm'
+};
+// Disable multi-threading in Service Worker environment to avoid "import() disallowed" issues
+ort.env.wasm.numThreads = 1;
+
 const MODEL_PATH = '../model/model.onnx';
 const BLACKLIST_PATH = '../assets/phishurl-list.csv';
+const SAFELIST_PATH = '../assets/safe-domains.json';
 
 let session = null;
 let featureExtractor = new FeatureExtractor();
-let whitelist = new Set();
+let whitelist = new Set(); // User whitelist
+let globalSafeList = new Set(); // Pre-defined safe domains
 let blacklist = new Set(); 
 
 // --- Initialization ---
 async function initModel() {
     try {
         console.log("Loading ONNX model from:", MODEL_PATH);
-        session = await ort.InferenceSession.create(MODEL_PATH);
+        // Ensure WASM backend is used
+        const options = { executionProviders: ['wasm'] };
+        session = await ort.InferenceSession.create(MODEL_PATH, options);
         console.log("Model loaded successfully. Input names:", session.inputNames, "Output names:", session.outputNames);
     } catch (e) {
         console.error("Failed to load model:", e);
@@ -28,7 +40,19 @@ async function loadLists() {
     const stored = await chrome.storage.local.get(['whitelist']);
     if (stored.whitelist) {
         whitelist = new Set(stored.whitelist);
-        console.log(`Loaded ${whitelist.size} entries into whitelist.`);
+        console.log(`Loaded ${whitelist.size} entries into user whitelist.`);
+    }
+
+    // Load Global Safe List
+    try {
+        const response = await fetch(SAFELIST_PATH);
+        if (response.ok) {
+            const domains = await response.json();
+            domains.forEach(d => globalSafeList.add(d));
+            console.log(`Loaded ${globalSafeList.size} entries into global safe list.`);
+        }
+    } catch (e) {
+        console.error("Failed to load global safe list:", e);
     }
     
     // Load blacklist from CSV
@@ -77,12 +101,24 @@ async function predict(urlStr) {
         return null;
     }
 
-    // 1. Whitelist Check
+    // 1. User Whitelist Check
     if (whitelist.has(urlHostname)) {
-        return { result: 'safe', reason: 'whitelist' };
+        return { result: 'safe', reason: 'whitelist', score: 0.0 };
     }
 
-    // 2. Blacklist Check
+    // 2. Global Safe List Check
+    // Check main domain and subdomains
+    if (globalSafeList.has(urlHostname)) {
+         return { result: 'safe', reason: 'global_safe', score: 0.0 };
+    }
+    // Check if hostname ends with any safe domain (e.g. "mail.google.com" ends with "google.com")
+    for (const safeDomain of globalSafeList) {
+        if (urlHostname.endsWith('.' + safeDomain) || urlHostname === safeDomain) {
+            return { result: 'safe', reason: 'global_safe', score: 0.0 };
+        }
+    }
+
+    // 3. Blacklist Check
     if (blacklist.has(urlStr) || blacklist.has(urlHostname)) {
         return { result: 'phishing', score: 1.0, reason: 'blacklist' };
     }
@@ -92,7 +128,7 @@ async function predict(urlStr) {
         return { result: 'error', reason: 'model_not_loaded' };
     }
 
-    // 3. ML Check
+    // 4. ML Check
     try {
         const inputVector = featureExtractor.getVector(urlStr);
         if (!inputVector) {
