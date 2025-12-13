@@ -191,38 +191,55 @@ function updateIcon(tabId, status) {
 
 // --- Navigation Listener ---
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'loading' && tab.url?.startsWith('http')) {
-        await updateIcon(tabId, 'loading');
+    // Don't update icon on loading - keep current state
+    if (changeInfo.status !== 'complete' || !tab.url?.startsWith('http')) {
         return;
     }
 
-    if (changeInfo.status === 'complete' && tab.url?.startsWith('http')) {
-        const prediction = await predict(tab.url);
-        stats.sitesChecked++;
+    // Immediately run prediction
+    const prediction = await predict(tab.url);
+    stats.sitesChecked++;
+    
+    if (prediction?.result === 'phishing') {
+        stats.phishingBlocked++;
+        updateIcon(tabId, 'phishing');
+        chrome.action.setBadgeText({ text: "!", tabId });
+        chrome.action.setBadgeBackgroundColor({ color: "#FF0000", tabId });
         
-        if (prediction?.result === 'phishing') {
-            stats.phishingBlocked++;
-            await updateIcon(tabId, 'phishing');
-            chrome.action.setBadgeText({ text: "!", tabId });
-            chrome.action.setBadgeBackgroundColor({ color: "#FF0000", tabId });
-            
-            chrome.notifications.create({
-                type: 'basic',
-                iconUrl: chrome.runtime.getURL('images/icon_danger.png'),
-                title: 'Phishing Detected!',
-                message: `${new URL(tab.url).hostname} is suspicious!`,
-                priority: 2
-            });
-            
-        } else if (prediction?.result === 'safe') {
-            stats.safeVisited++;
-            await updateIcon(tabId, 'safe');
-            chrome.action.setBadgeText({ text: "", tabId });
+        // Subtle notification
+        chrome.notifications.create(`phishing-${tabId}`, {
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('images/avatar_danger_128.png'),
+            title: '⚠️ Warning',
+            message: `${new URL(tab.url).hostname} may be dangerous`,
+            priority: 1,
+            silent: true
+        });
+        
+        // Auto-close notification after 5 seconds
+        setTimeout(() => {
+            chrome.notifications.clear(`phishing-${tabId}`);
+        }, 5000);
+        
+    } else if (prediction?.result === 'safe') {
+        stats.safeVisited++;
+        
+        // Only show green circle for ML-verified sites
+        // For global_safe/whitelist, show pure avatar (neutral)
+        if (prediction.reason === 'ml') {
+            updateIcon(tabId, 'safe');
+        } else {
+            updateIcon(tabId, 'neutral');
         }
-        
-        // Save stats periodically
-        chrome.storage.local.set({ stats });
+        chrome.action.setBadgeText({ text: "", tabId });
+    } else {
+        // Error or unknown - pure avatar
+        updateIcon(tabId, 'neutral');
+        chrome.action.setBadgeText({ text: "", tabId });
     }
+    
+    // Save stats
+    chrome.storage.local.set({ stats });
 });
 
 // --- Message Handler ---
