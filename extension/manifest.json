@@ -30,7 +30,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["model/model.onnx", "images/*.png", "assets/*.csv"],
+      "resources": ["model/model.onnx", "images/*.png", "assets/*.csv", "assets/*.json"],
       "matches": ["<all_urls>"]
     }
   ],

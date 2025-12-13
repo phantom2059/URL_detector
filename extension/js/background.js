@@ -207,16 +207,23 @@ async function predict(urlStr) {
 
 // --- Navigation Listener ---
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    // 1. Loading state -> Neutral (Grey) icon
+    if (changeInfo.status === 'loading') {
+        chrome.action.setIcon({ path: "images/icon_neutral.png", tabId: tabId });
+        return;
+    }
+
+    // 2. Complete state -> Analyze -> Set Icon (Green/Red)
     if (changeInfo.status === 'complete' && tab.url && tab.url.startsWith('http')) {
         
-        // Set icon to loading/neutral first
-        chrome.action.setIcon({ path: "../images/icon_neutral.png", tabId: tabId });
+        // Ensure icon is neutral while analyzing (in case it wasn't set during loading)
+        // chrome.action.setIcon({ path: "images/icon_neutral.png", tabId: tabId });
 
         const prediction = await predict(tab.url);
         
         if (prediction && prediction.result === 'phishing') {
             // Alert user!
-            chrome.action.setIcon({ path: "../images/icon_danger.png", tabId: tabId });
+            chrome.action.setIcon({ path: "images/icon_danger.png", tabId: tabId });
             chrome.action.setBadgeText({ text: "!", tabId: tabId });
             chrome.action.setBadgeBackgroundColor({ color: "#FF0000", tabId: tabId });
             
@@ -225,14 +232,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             
             chrome.notifications.create({
                 type: 'basic',
-                iconUrl: '../images/icon_danger.png',
+                iconUrl: 'images/icon_danger.png',
                 title: 'Phishing Detected!',
                 message: `The site ${new URL(tab.url).hostname} appears to be malicious.\n${reasonText}`,
                 priority: 2
             });
             
         } else if (prediction && prediction.result === 'safe') {
-            chrome.action.setIcon({ path: "../images/icon_safe.png", tabId: tabId });
+            chrome.action.setIcon({ path: "images/icon_safe.png", tabId: tabId });
             // Remove badge if safe
             chrome.action.setBadgeText({ text: "", tabId: tabId });
         }
